@@ -107,7 +107,7 @@ int main(int argc, const char *argv[])
 		struct thread *thread = array_of_threads[t];
 		thread_join(thread);
 	}
-	uint64 total_packets = 0;
+	uint64_t total_packets = 0;
 	for (t = 0; t < thread_num; t++) {
 		struct state *state = &array_of_states[t];
 		total_packets += state->packets;
