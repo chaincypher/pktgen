@@ -6,10 +6,26 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <errno.h>
+#include <time.h>
 
 #include "common.h"
 
 int total_packets=0;
+
+int pause()
+{
+   struct timespec tim, tim2;
+   tim.tv_sec = 0;
+   tim.tv_nsec = 4000000;
+
+   if(nanosleep(&tim , &tim2) < 0 )   
+   {
+      printf("Nano sleep system call failed \n");
+      return -1;
+   }
+
+   return 0;
+}
 
 struct state {
 	struct net_addr *target_addr;
@@ -64,6 +80,7 @@ void thread_loop(void *userdata) {
 		}
 		state->packets += r;
 		cnt--;
+		pause();
 	}
 }
 
@@ -112,6 +129,8 @@ int main(int argc, const char *argv[])
 		struct state *state = &array_of_states[t];
 		total_packets += state->packets;
 	}
+	pause();
+	pause();
 /*
 	int cnt = loop_count;
 	while (1) {
@@ -130,5 +149,8 @@ int main(int argc, const char *argv[])
 	}
 */
 	fprintf(stderr, "Sent %lu packets\n", total_packets);
+	while (1) {
+		pause();
+	}
 	return 0;
 }
