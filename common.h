@@ -49,5 +49,5 @@ void net_gethostbyname(struct net_addr *shost, const char *host, int port);
 int net_connect_udp(struct net_addr *addr, int src_port);
 
 struct thread;
-struct thread *thread_spawn(void (*callback)(void *), void *userdata);
+struct thread *thread_spawn(void (*callback)(void *), void *userdata, int pin_cpu, int cpu_id);
 void thread_join(struct thread *);
