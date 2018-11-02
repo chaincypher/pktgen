@@ -14,9 +14,10 @@ int total_packets=0;
 
 int pause()
 {
+   return 0;
    struct timespec tim, tim2;
    tim.tv_sec = 0;
-   tim.tv_nsec = 4000000;
+   tim.tv_nsec = 1000000;
 
    if(nanosleep(&tim , &tim2) < 0 )   
    {
@@ -88,7 +89,7 @@ int main(int argc, const char *argv[])
 {
 	int packets_in_buf = 1024;
 	const char *payload = (const char[32]){0};
-	int payload_sz = 32;
+	int payload_sz = 64-18-4-20-8; //ethernet header, vlan, ip header, udp header
 
 	if (argc == 1) {
 		FATAL("Usage: %s count [target ip:port] [target ...]", argv[0]);
@@ -129,8 +130,6 @@ int main(int argc, const char *argv[])
 		struct state *state = &array_of_states[t];
 		total_packets += state->packets;
 	}
-	pause();
-	pause();
 /*
 	int cnt = loop_count;
 	while (1) {
@@ -149,8 +148,5 @@ int main(int argc, const char *argv[])
 	}
 */
 	fprintf(stderr, "Sent %lu packets\n", total_packets);
-	while (1) {
-		pause();
-	}
 	return 0;
 }
