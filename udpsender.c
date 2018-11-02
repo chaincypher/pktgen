@@ -118,7 +118,7 @@ int main(int argc, const char *argv[])
 		state->src_port = 11404;
 		state->cnt = loop_count;
 		state->packets = 0;
-		array_of_threads[t] = thread_spawn(thread_loop, state);
+		array_of_threads[t] = thread_spawn(thread_loop, state, 0, 0);
 	}
 	for (t = 0; t < thread_num; t++) {
 		struct thread *thread = array_of_threads[t];

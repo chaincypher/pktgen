@@ -14,10 +14,11 @@
 
 
 #define MTU_SIZE (2048-64*2)
-#define MAX_MSG 512
+#define MAX_MSG 1024
 
 struct state {
 	int fd;
+	int cpu_id;
 	volatile uint64_t bps;
 	volatile uint64_t pps;
 	struct mmsghdr messages[MAX_MSG];
@@ -47,7 +48,7 @@ static void thread_loop(void *userdata)
 
 	while (1) {
 		/* Blocking recv. */
-		int r = recvmmsg(state->fd, &state->messages[0], MAX_MSG, MSG_WAITFORONE, NULL);
+		int r = recvmmsg(state->fd, &state->messages[0], MAX_MSG, 0, NULL);
 		if (r <= 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
 				continue;
@@ -71,54 +72,33 @@ static void thread_loop(void *userdata)
 
 int main(int argc, const char *argv[])
 {
-	const char *listen_addr_str = "0.0.0.0:4321";
-	int recv_buf_size = 4*1024;
-	int thread_num = 1;
-	int reuseport = 0;
+	int recv_buf_size = 4*1024*1024;
+	int thread_num = argc-1;
 
-	switch (argc) {
-	case 4:
-		reuseport = atoi(argv[3]);
-	case 3:
-		thread_num = atoi(argv[2]);
-	case 2:
-		listen_addr_str = argv[1];
-	case 1:
-		break;
-	default:
-		FATAL("Usage: %s [listen ip:port] [fork cnt] [reuseport]", argv[0]);
+	if (argc ==1) {
+		FATAL("Usage: %s [listen ip:port]", argv[0]);
 	}
+        struct net_addr *listen_addrs = calloc(thread_num, sizeof(struct net_addr));
 
-
-	struct net_addr listen_addr;
-	parse_addr(&listen_addr, listen_addr_str);
-
-	int main_fd = -1;
-	if (reuseport == 0) {
-		fprintf(stderr, "[*] Starting udpreceiver on %s, recv buffer %iKiB\n",
-			addr_to_str(&listen_addr), recv_buf_size / 1024);
-
-		main_fd = net_bind_udp(&listen_addr, 0);
-		net_set_buffer_size(main_fd, recv_buf_size, 0);
-	}
+        int t;
+        for (t = 0; t < thread_num; t++) {
+                const char *listen_addr_str = argv[t+1];
+                parse_addr(&listen_addrs[t], listen_addr_str);
+        }
 
 	struct state *array_of_states = calloc(thread_num, sizeof(struct state));
 
-	int t;
 	for (t = 0; t < thread_num; t++) {
 		struct state *state = &array_of_states[t];
 		state_init(state);
-		if (reuseport == 0) {
-			state->fd = main_fd;
-		} else {
-			fprintf(stderr, "[*] Starting udpreceiver on %s, recv buffer %iKiB\n",
-				addr_to_str(&listen_addr), recv_buf_size / 1024);
+		fprintf(stderr, "[*] Starting udpreceiver on %s, recv buffer %iKiB\n",
+			addr_to_str(&listen_addrs[t]), recv_buf_size / 1024);
 
-			int fd = net_bind_udp(&listen_addr, 1);
-			net_set_buffer_size(fd, recv_buf_size, 0);
-			state->fd = fd;
-		}
-		thread_spawn(thread_loop, state);
+		int fd = net_bind_udp(&listen_addrs[t], 1);
+		net_set_buffer_size(fd, recv_buf_size, 0);
+		state->fd = fd;
+		state->cpu_id = t;
+		thread_spawn(thread_loop, state, 1, state->cpu_id);
 	}
 
 	uint64_t last_pps = 0;

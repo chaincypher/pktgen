@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -175,12 +176,11 @@ static void *_thread_start(void *userdata)
 	if (r != 0) {
 		PFATAL("pthread_sigmask()");
 	}
-
 	thread->callback(thread->userdata);
 	return NULL;
 }
 
-struct thread *thread_spawn(void (*callback)(void *), void *userdata)
+struct thread *thread_spawn(void (*callback)(void *), void *userdata, int pin_cpu, int cpu_id)
 {
 	struct thread *thread = calloc(1, sizeof(struct thread));
 	thread->callback = callback;
@@ -188,6 +188,26 @@ struct thread *thread_spawn(void (*callback)(void *), void *userdata)
 	int r = pthread_create(&thread->thread_id, NULL, _thread_start, thread);
 	if (r != 0) {
 		PFATAL("pthread_create()");
+	}
+	if (pin_cpu) {
+		cpu_set_t cpuset;
+		int j, s;
+		CPU_ZERO (&cpuset);
+		CPU_SET(cpu_id, &cpuset);
+		s = pthread_setaffinity_np(thread->thread_id, sizeof(cpu_set_t), &cpuset);
+           	if (s != 0)
+               		PFATAL("pthread_setaffinity_np return %d\n", s);
+
+
+           	s = pthread_getaffinity_np(thread->thread_id, sizeof(cpu_set_t), &cpuset);
+           	if (s != 0)
+               		PFATAL("pthread_getaffinity_np return %d\n", s);
+
+           	fprintf(stderr, "Set returned by pthread_getaffinity_np() contained:\n");
+           	for (j = 0; j < CPU_SETSIZE; j++)
+               		if (CPU_ISSET(j, &cpuset))
+                   		fprintf(stderr, "    CPU %d\n", j);
+
 	}
 	return thread;
 }
