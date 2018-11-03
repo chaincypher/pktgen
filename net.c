@@ -213,8 +213,6 @@ struct thread *thread_spawn(void (*callback)(void *), void *userdata, int pin_cp
 }
 
 void thread_join (struct thread *thread) {
-	fprintf(stderr, "Join thread %p \n", thread);
-	fprintf(stderr, "Join thread %lu\n", thread->thread_id);
 	pthread_join(thread->thread_id, NULL);
 }
 

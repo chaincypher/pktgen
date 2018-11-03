@@ -12,12 +12,11 @@
 
 int total_packets=0;
 
-int pause()
+int pause(int waitus)
 {
-   return 0;
    struct timespec tim, tim2;
    tim.tv_sec = 0;
-   tim.tv_nsec = 1000000;
+   tim.tv_nsec = waitus * 1000;
 
    if(nanosleep(&tim , &tim2) < 0 )   
    {
@@ -34,7 +33,10 @@ struct state {
 	const char *payload;
 	int payload_sz;
 	int src_port;
+	int cpu_id;
+	int waitus;
 	int packets;
+	uint64_t bytes;
 	int cnt;
 };
 
@@ -79,28 +81,43 @@ void thread_loop(void *userdata) {
 			msg->msg_len = 0;
 			bytes += len;
 		}
+		state->bytes += bytes;
 		state->packets += r;
 		cnt--;
-		pause();
+		pause(state->waitus);
 	}
+}
+
+// pps: packet/s, frame_size: ethernet frame, burst_size: packet burst num
+// thread_num: number of threads, line_rate: bps in M (bits per us)
+int calculate_pause (int pps, int frame_size, int burst_size, int thread_num, int line_rate) {
+	uint64_t bits_per_burst = (frame_size+20)*burst_size*8;
+	uint64_t burst_per_thread = pps / thread_num / burst_size;
+	uint64_t pause_time = (line_rate * 1000000 - (burst_per_thread * bits_per_burst))/line_rate / burst_per_thread * 0.6;
+	return (int)pause_time;
 }
 
 int main(int argc, const char *argv[])
 {
-	int packets_in_buf = 1024;
-	const char *payload = (const char[32]){0};
-	int payload_sz = 64-18-4-20-8; //ethernet header, vlan, ip header, udp header
-
 	if (argc == 1) {
-		FATAL("Usage: %s count [target ip:port] [target ...]", argv[0]);
+		FATAL("Usage: %s frame_size burst count pps(k) [target ip:port] [target ...]", argv[0]);
 	}
-	int loop_count = atoi(argv[1]);
-	struct net_addr *target_addrs = calloc(argc-2, sizeof(struct net_addr));
-	int thread_num = argc - 2;
+	int frame_size = atoi(argv[1]);	// ethernet frame size
+	int payload_sz = frame_size - 18 -20 -8;	// udp payload size
+	int burst_size = atoi(argv[2]);
+	int loop_count = atoi(argv[3]);
+	int pps = atoi(argv[4]) * 1000;
+	int packets_in_buf = burst_size;
+	const char *payload = calloc(payload_sz, 1);
+	struct net_addr *target_addrs = calloc(argc-5, sizeof(struct net_addr));
+	int thread_num = argc - 5;
+	int waitus = calculate_pause (pps, frame_size, burst_size, thread_num, 1000);
+	fprintf(stderr, "pps %i frame size %i burst %i line rate %i Mbps pause %i us\n",
+		pps, frame_size, burst_size, 1000, waitus);
 
 	int t;
 	for (t = 0; t < thread_num; t++) {
-		const char *target_addr_str = argv[t+2];
+		const char *target_addr_str = argv[t+5];
 		parse_addr(&target_addrs[t], target_addr_str);
 
 		fprintf(stderr, "[*] Sending to %s, send buffer %i packets\n",
@@ -119,16 +136,21 @@ int main(int argc, const char *argv[])
 		state->src_port = 11404;
 		state->cnt = loop_count;
 		state->packets = 0;
-		array_of_threads[t] = thread_spawn(thread_loop, state, 0, 0);
+		state->bytes = 0;
+		state->cpu_id = t;
+		state->waitus = waitus;
+		array_of_threads[t] = thread_spawn(thread_loop, state, 1, state->cpu_id);
 	}
 	for (t = 0; t < thread_num; t++) {
 		struct thread *thread = array_of_threads[t];
 		thread_join(thread);
 	}
 	uint64_t total_packets = 0;
+	uint64_t total_bytes = 0;
 	for (t = 0; t < thread_num; t++) {
 		struct state *state = &array_of_states[t];
 		total_packets += state->packets;
+		total_bytes += state->bytes;
 	}
 /*
 	int cnt = loop_count;
@@ -147,6 +169,6 @@ int main(int argc, const char *argv[])
 		// pass
 	}
 */
-	fprintf(stderr, "Sent %lu packets\n", total_packets);
+	fprintf(stderr, "Sent %lu packets  %lu bytes\n", total_packets, total_bytes);
 	return 0;
 }
