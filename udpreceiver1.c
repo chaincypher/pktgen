@@ -8,6 +8,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include "common.h"
@@ -19,6 +20,7 @@
 struct state {
 	int fd;
 	int cpu_id;
+	volatile uint64_t ebps;
 	volatile uint64_t bps;
 	volatile uint64_t pps;
 	struct mmsghdr messages[MAX_MSG];
@@ -56,7 +58,7 @@ static void thread_loop(void *userdata)
 			PFATAL("recvmmsg()");
 		}
 
-		int i, bytes = 0;
+		int i, bytes = 0, ebytes = 0;
 		for (i = 0; i < r; i++) {
 			struct mmsghdr *msg = &state->messages[i];
 			/* char *buf = msg->msg_hdr.msg_iov->iov_base; */
@@ -64,17 +66,25 @@ static void thread_loop(void *userdata)
 			msg->msg_hdr.msg_flags = 0;
 			msg->msg_len = 0;
 			bytes += len;
+			ebytes += len + (12+8+18+20+8); //ifg+preamble+ethernet+ip+udp
 		}
 		__atomic_fetch_add(&state->pps, r, 0);
 		__atomic_fetch_add(&state->bps, bytes, 0);
+		__atomic_fetch_add(&state->ebps, ebytes, 0);
 	}
+}
+
+uint64_t current_timestamp() {
+    	struct timeval te; 
+    	gettimeofday(&te, NULL); // get current time
+	uint64_t us = te.tv_sec*1000000L + te.tv_usec; // calculate microsecond
+    	return us;
 }
 
 int main(int argc, const char *argv[])
 {
 	int recv_buf_size = 4*1024*1024;
 	int thread_num = argc-1;
-
 	if (argc ==1) {
 		FATAL("Usage: %s [listen ip:port]", argv[0]);
 	}
@@ -103,7 +113,10 @@ int main(int argc, const char *argv[])
 
 	uint64_t last_pps = 0;
 	uint64_t last_bps = 0;
+	uint64_t last_ebps = 0;
 	uint64_t total_packets = 0;
+	uint64_t total_bytes = 0;
+	uint64_t last_time = current_timestamp();
 	while (1) {
 		struct timeval timeout =
 			NSEC_TIMEVAL(MSEC_NSEC(1000UL));
@@ -117,24 +130,33 @@ int main(int argc, const char *argv[])
 			}
 		}
 
-		uint64_t now_pps = 0, now_bps = 0;
+		uint64_t now_pps = 0, now_bps = 0, now_ebps = 0;
 		for (t = 0; t < thread_num; t++) {
 			struct state *state = &array_of_states[t];
 			now_pps += __atomic_load_n(&state->pps, 0);
 			now_bps += __atomic_load_n(&state->bps, 0);
+			now_ebps += __atomic_load_n(&state->ebps, 0);
 		}
+		uint64_t current_time = current_timestamp();
+		uint64_t delta_time = current_time - last_time;
+		last_time = current_time;
 
 		total_packets += now_pps - last_pps;
+		total_bytes += now_bps - last_bps;
 		double delta_pps = now_pps - last_pps;
 		double delta_bps = now_bps - last_bps;
+		uint64_t delta_ebps = now_ebps - last_ebps;
 		last_pps = now_pps;
 		last_bps = now_bps;
+		last_ebps = now_ebps;
 
-		printf("%7.3fM pps %7.3fMiB / %7.3fMb Total %lu packets\n",
+		printf("%7.3fM pps %7.3fMiB / %7.3fMb / %7.3fMbps Total %lu packets %lu bytes\n",
 		       delta_pps / 1000.0 / 1000.0,
 		       delta_bps / 1024.0 / 1024.0,
 		       delta_bps * 8.0 / 1000.0 / 1000.0,
-		       total_packets );
+		       delta_ebps * 8.0 / 1000.0 / 1000.0 / (delta_time/1000000.0),
+		       total_packets,
+		       total_bytes );
 	}
 
 	return 0;
