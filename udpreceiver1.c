@@ -50,7 +50,7 @@ static void thread_loop(void *userdata)
 
 	while (1) {
 		/* Blocking recv. */
-		int r = recvmmsg(state->fd, &state->messages[0], MAX_MSG, 0, NULL);
+		int r = recvmmsg(state->fd, &state->messages[0], MAX_MSG, MSG_WAITFORONE, NULL);
 		if (r <= 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
 				continue;
